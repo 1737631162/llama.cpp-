@@ -3077,10 +3077,79 @@ struct llm_bigram_spm {
     size_t size;
 };
 
+// 使用多个分隔符子串分割字符串
+std::vector<std::string> splitString(const std::string& input, const std::vector<std::string>& delimiters) {
+    std::vector<std::string> tokens;
+    size_t startPos = 0;
+    size_t foundPos = 0;
+    
+    while (startPos < input.length()) {
+        size_t foundPos = std::string::npos;
+        std::string foundDelimiter= "None";
+
+        // 在每个分隔符中查找最早出现的位置
+        for (const std::string& delimiter : delimiters) {
+            size_t pos = input.find(delimiter, startPos);
+            if (pos != std::string::npos && 
+               (foundPos == std::string::npos || pos < foundPos)) {
+                foundPos = pos;
+                foundDelimiter = delimiter;
+            }
+        }
+
+        if (foundPos != std::string::npos) {
+            if (foundPos > startPos) {
+                tokens.push_back("\xe2\x96\x81" + input.substr(startPos, foundPos - startPos));
+            }
+            tokens.push_back(foundDelimiter);
+            startPos = foundPos + foundDelimiter.length();
+        } else {
+            tokens.push_back("\xe2\x96\x81" + input.substr(startPos));
+            break;
+        }
+    }
+    return tokens;
+}
+
+bool is_spectial_token(const std::string & text, const std::vector<std::string>& delimiters) {
+    auto it = std::find(delimiters.begin(), delimiters.end(), text);
+    if (it != delimiters.end()) {
+        return true;
+    }
+    return false;
+}
+
 struct llm_tokenizer_spm {
-    llm_tokenizer_spm(const llama_vocab & vocab): vocab(vocab) {}
+    using id    = int32_t;
+    using token = std::string;
+
+    llm_tokenizer_spm(const llama_vocab & vocab): vocab(vocab) {
+    }
 
     void tokenize(const std::string & text, std::vector<llama_vocab::id> & output) {
+        std::vector<std::string> delimiters {"<s>", "</s>", "<unk>"};
+        std::vector<std::string> tokens = splitString(text, delimiters);
+        // auto it = std::find(strings.begin(), strings.end(), target);
+        for (auto& text_t : tokens) {
+            std::vector<llama_vocab::id> inners;
+            bool find = false;
+            if (is_spectial_token(text_t, delimiters)) {
+                const auto it = vocab.token_to_id.find(text_t);
+                if (it != vocab.token_to_id.end()) {
+                    find = true;
+                    auto id_inner = it->second;
+                    inners.push_back(id_inner);
+                }
+            } 
+            if (!find) {
+                llm_tokenizer_spm spm(vocab);
+                spm.tokenize_inner(text_t, inners);
+            }
+            output.insert(output.end(), inners.begin(), inners.end());
+        }
+    }
+
+    void tokenize_inner(const std::string & text, std::vector<llama_vocab::id> & output) {
         // split string into utf8 chars
         int index = 0;
         size_t offs = 0;
@@ -3405,8 +3474,9 @@ static std::vector<llama_vocab::id> llama_tokenize_internal(const llama_vocab & 
         case LLAMA_VOCAB_TYPE_SPM:
             {
                 // without adding this leading whitespace, we do not get the same results as the original tokenizer
-                raw_text = " " + raw_text;
-
+                // raw_text = " " + raw_text;
+                raw_text = raw_text;
+                
                 llm_tokenizer_spm tokenizer(vocab);
                 llama_escape_whitespace(raw_text);
                 tokenizer.tokenize(raw_text, output);
@@ -6132,8 +6202,9 @@ int llama_tokenize_with_model(
                   const char * text,
                  llama_token * tokens,
                          int   n_max_tokens,
-                        bool   add_bos) {
-    auto res = llama_tokenize_internal(model->vocab, text, add_bos);
+                        bool   add_bos) {     
+    std::string strFromCStr(text);                     
+    auto res = llama_tokenize_internal(model->vocab, strFromCStr, add_bos);
 
     if (n_max_tokens < (int) res.size()) {
         LLAMA_LOG_ERROR("%s: too many tokens\n", __func__);

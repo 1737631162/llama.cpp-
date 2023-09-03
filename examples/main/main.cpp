@@ -253,8 +253,10 @@ int main(int argc, char ** argv) {
         }
     }
 
-    const bool add_bos = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
+    bool add_bos = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
     LOG("add_bos: %d\n", add_bos);
+
+    add_bos = false;
 
     std::vector<llama_token> embd_inp;
 

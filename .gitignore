@@ -77,3 +77,4 @@ tests/test-sampling
 tests/test-tokenizer-0-llama
 tests/test-tokenizer-0-falcon
 tests/test-tokenizer-1
+logtxt/
