@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-import shutil
-import sys
-import struct
-import tempfile
-import numpy as np
+from __future__ import annotations
+
 import json
 import os
-from pathlib import Path
-
+import shutil
+import struct
+import sys
+import tempfile
 from enum import IntEnum, auto
 from io import BufferedWriter
-from typing import Any, BinaryIO, Callable, IO, Dict, List, Optional, Sequence, Tuple, Union
+from pathlib import Path
+from typing import IO, Any, BinaryIO, Callable, Sequence
+
+import numpy as np
 
 #
 # constants
@@ -75,12 +77,14 @@ KEY_TOKENIZER_RWKV       = "tokenizer.rwkv.world"
 
 
 class MODEL_ARCH(IntEnum):
-    LLAMA  : int = auto()
-    FALCON : int = auto()
-    GPT2   : int = auto()
-    GPTJ   : int = auto()
-    GPTNEOX: int = auto()
-    MPT    : int = auto()
+    LLAMA         : int = auto()
+    FALCON        : int = auto()
+    BAICHUAN      : int = auto()
+    GPT2          : int = auto()
+    GPTJ          : int = auto()
+    GPTNEOX       : int = auto()
+    MPT           : int = auto()
+    STARCODER     : int = auto()
 
 
 class MODEL_TENSOR(IntEnum):
@@ -103,16 +107,18 @@ class MODEL_TENSOR(IntEnum):
     FFN_NORM     : int = auto()
 
 
-MODEL_ARCH_NAMES: Dict[MODEL_ARCH, str] = {
-    MODEL_ARCH.LLAMA:   "llama",
-    MODEL_ARCH.FALCON:  "falcon",
-    MODEL_ARCH.GPT2:    "gpt2",
-    MODEL_ARCH.GPTJ:    "gptj",
-    MODEL_ARCH.GPTNEOX: "gptneox",
-    MODEL_ARCH.MPT:     "mpt",
+MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
+    MODEL_ARCH.LLAMA:          "llama",
+    MODEL_ARCH.FALCON:         "falcon",
+    MODEL_ARCH.BAICHUAN:       "baichuan",
+    MODEL_ARCH.GPT2:           "gpt2",
+    MODEL_ARCH.GPTJ:           "gptj",
+    MODEL_ARCH.GPTNEOX:        "gptneox",
+    MODEL_ARCH.MPT:            "mpt",
+    MODEL_ARCH.STARCODER:      "starcoder",
 }
 
-MODEL_TENSOR_NAMES: Dict[MODEL_ARCH, Dict[MODEL_TENSOR, str]] = {
+MODEL_TENSOR_NAMES: dict[MODEL_ARCH, dict[MODEL_TENSOR, str]] = {
     MODEL_ARCH.LLAMA: {
         MODEL_TENSOR.TOKEN_EMBD:    "token_embd",
         MODEL_TENSOR.OUTPUT_NORM:   "output_norm",
@@ -151,6 +157,34 @@ MODEL_TENSOR_NAMES: Dict[MODEL_ARCH, Dict[MODEL_TENSOR, str]] = {
         MODEL_TENSOR.FFN_DOWN:    "blk.{bid}.ffn_down",
         MODEL_TENSOR.FFN_UP:      "blk.{bid}.ffn_up",
     },
+    MODEL_ARCH.BAICHUAN: {
+        MODEL_TENSOR.TOKEN_EMBD:    "token_embd",
+        MODEL_TENSOR.OUTPUT_NORM:   "output_norm",
+        MODEL_TENSOR.OUTPUT:        "output",
+        MODEL_TENSOR.ROPE_FREQS:    "rope_freqs",
+        MODEL_TENSOR.ATTN_NORM:     "blk.{bid}.attn_norm",
+        MODEL_TENSOR.ATTN_Q:        "blk.{bid}.attn_q",
+        MODEL_TENSOR.ATTN_K:        "blk.{bid}.attn_k",
+        MODEL_TENSOR.ATTN_V:        "blk.{bid}.attn_v",
+        MODEL_TENSOR.ATTN_OUT:      "blk.{bid}.attn_output",
+        MODEL_TENSOR.ATTN_ROT_EMBD: "blk.{bid}.attn_rot_embd",
+        MODEL_TENSOR.FFN_NORM:      "blk.{bid}.ffn_norm",
+        MODEL_TENSOR.FFN_GATE:      "blk.{bid}.ffn_gate",
+        MODEL_TENSOR.FFN_DOWN:      "blk.{bid}.ffn_down",
+        MODEL_TENSOR.FFN_UP:        "blk.{bid}.ffn_up",
+    },
+    MODEL_ARCH.STARCODER: {
+        MODEL_TENSOR.TOKEN_EMBD:    "token_embd",
+        MODEL_TENSOR.POS_EMBD:      "position_embd",
+        MODEL_TENSOR.OUTPUT_NORM:   "output_norm",
+        MODEL_TENSOR.OUTPUT:        "output",
+        MODEL_TENSOR.ATTN_NORM:     "blk.{bid}.attn_norm",
+        MODEL_TENSOR.ATTN_QKV:      "blk.{bid}.attn_qkv",
+        MODEL_TENSOR.ATTN_OUT:      "blk.{bid}.attn_output",
+        MODEL_TENSOR.FFN_NORM:      "blk.{bid}.ffn_norm",
+        MODEL_TENSOR.FFN_DOWN:      "blk.{bid}.ffn_down",
+        MODEL_TENSOR.FFN_UP:        "blk.{bid}.ffn_up",
+    },
     MODEL_ARCH.GPT2: {
         # TODO
     },
@@ -158,8 +192,12 @@ MODEL_TENSOR_NAMES: Dict[MODEL_ARCH, Dict[MODEL_TENSOR, str]] = {
 }
 
 # tensors that will not be serialized
-MODEL_TENSOR_SKIP: Dict[MODEL_ARCH, List[MODEL_TENSOR]] = {
+MODEL_TENSOR_SKIP: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
     MODEL_ARCH.LLAMA: [
+        MODEL_TENSOR.ROPE_FREQS,
+        MODEL_TENSOR.ATTN_ROT_EMBD,
+    ],
+    MODEL_ARCH.BAICHUAN: [
         MODEL_TENSOR.ROPE_FREQS,
         MODEL_TENSOR.ATTN_ROT_EMBD,
     ],
@@ -167,7 +205,7 @@ MODEL_TENSOR_SKIP: Dict[MODEL_ARCH, List[MODEL_TENSOR]] = {
 
 
 class TensorNameMap:
-    mappings_cfg: Dict[MODEL_TENSOR, Tuple[str, ...]] = {
+    mappings_cfg: dict[MODEL_TENSOR, tuple[str, ...]] = {
         # Token embeddings
         MODEL_TENSOR.TOKEN_EMBD: (
             "gpt_neox.embed_in",           # gptneox
@@ -185,7 +223,7 @@ class TensorNameMap:
         # Output
         MODEL_TENSOR.OUTPUT: (
             "embed_out", # gptneox
-            "lm_head",   # gpt2 mpt falcon llama-hf
+            "lm_head",   # gpt2 mpt falcon llama-hf baichuan
             "output",    # llama-pth
         ),
 
@@ -193,7 +231,7 @@ class TensorNameMap:
         MODEL_TENSOR.OUTPUT_NORM: (
             "gpt_neox.final_layer_norm", # gptneox
             "transformer.ln_f",          # gpt2 falcon
-            "model.norm",                # llama-hf
+            "model.norm",                # llama-hf baichuan
             "norm",                      # llama-pth
         ),
 
@@ -203,7 +241,7 @@ class TensorNameMap:
         ),
     }
 
-    block_mappings_cfg: Dict[MODEL_TENSOR, Tuple[str, ...]] = {
+    block_mappings_cfg: dict[MODEL_TENSOR, tuple[str, ...]] = {
         # Attention norm
         MODEL_TENSOR.ATTN_NORM: (
             "gpt_neox.layers.{bid}.input_layernorm", # gptneox
@@ -298,9 +336,9 @@ class TensorNameMap:
         ),
     }
 
-    mapping: Dict[str, Tuple[MODEL_TENSOR, str]]
+    mapping: dict[str, tuple[MODEL_TENSOR, str]]
 
-    tensor_names: Dict[MODEL_TENSOR, str]
+    tensor_names: dict[MODEL_TENSOR, str]
 
     def __init__(self, arch: MODEL_ARCH, n_blocks: int):
         mapping = self.mapping = {}
@@ -309,6 +347,7 @@ class TensorNameMap:
             tensor_name = tensor_names.get(tensor)
             if tensor_name is None:
                 continue
+            mapping[tensor_name] = (tensor, tensor_name)
             for key in keys:
                 mapping[key] = (tensor, tensor_name)
         for bid in range(n_blocks):
@@ -317,11 +356,12 @@ class TensorNameMap:
                 if tensor_name is None:
                     continue
                 tensor_name = tensor_name.format(bid = bid)
+                mapping[tensor_name] = (tensor, tensor_name)
                 for key in keys:
                     key = key.format(bid = bid)
                     mapping[key] = (tensor, tensor_name)
 
-    def get_type_and_name(self, key: str, try_suffixes: Sequence[str]) -> Optional[Tuple[MODEL_TENSOR, str]]:
+    def get_type_and_name(self, key: str, try_suffixes: Sequence[str] = ()) -> tuple[MODEL_TENSOR, str] | None:
         result = self.mapping.get(key)
         if result is not None:
             return result
@@ -332,13 +372,13 @@ class TensorNameMap:
                     return (result[0], result[1] + suffix)
         return None
 
-    def get_name(self, key: str, try_suffixes: Sequence[str]) -> Optional[str]:
+    def get_name(self, key: str, try_suffixes: Sequence[str] = ()) -> str | None:
         result = self.get_type_and_name(key, try_suffixes = try_suffixes)
         if result is None:
             return None
         return result[1]
 
-    def get_type(self, key: str, try_suffixes: Sequence[str]) -> Optional[MODEL_TENSOR]:
+    def get_type(self, key: str, try_suffixes: Sequence[str] = ()) -> MODEL_TENSOR | None:
         result = self.get_type_and_name(key, try_suffixes = try_suffixes)
         if result is None:
             return None
@@ -432,10 +472,10 @@ class GGUFWriter:
     ti_data = b""
     ti_data_count = 0
     use_temp_file: bool
-    temp_file: Optional[tempfile.SpooledTemporaryFile[bytes]] = None
-    tensors: List[Tuple[np.ndarray[Any, Any], int]]
+    temp_file: tempfile.SpooledTemporaryFile[bytes] | None = None
+    tensors: list[tuple[np.ndarray[Any, Any], int]]
 
-    def __init__(self, path: Union[os.PathLike[str], str], arch: str, use_temp_file = True):
+    def __init__(self, path: os.PathLike[str] | str, arch: str, use_temp_file = True):
         self.fout = open(path, "wb")
         self.arch = arch
         self.add_architecture()
@@ -531,7 +571,7 @@ class GGUFWriter:
         GGUFValueType.FLOAT64: "<d",
         GGUFValueType.BOOL:    "?" ,
     }
-    def add_val(self, val: Any, vtype: Optional[GGUFValueType] = None, add_vtype: bool = True):
+    def add_val(self, val: Any, vtype: GGUFValueType | None = None, add_vtype: bool = True):
         if vtype is None:
             vtype = GGUFValueType.get_type(val)
 
@@ -561,7 +601,7 @@ class GGUFWriter:
     def ggml_pad(x: int, n: int) -> int:
         return ((x + n - 1) // n) * n
 
-    def add_tensor_info(self, name: str, tensor_shape: Sequence[int], tensor_dtype: Union[np.dtype[np.float16], np.dtype[np.float32]], tensor_nbytes: int, raw_dtype: Optional[GGMLQuantizationType] = None):
+    def add_tensor_info(self, name: str, tensor_shape: Sequence[int], tensor_dtype: np.dtype[np.float16] | np.dtype[np.float32], tensor_nbytes: int, raw_dtype: GGMLQuantizationType | None = None):
         assert raw_dtype is not None or tensor_dtype in (np.float32, np.float16), "Only F32 and F16 tensors are supported for now"
 
         encoded_name = name.encode("utf8")
@@ -580,7 +620,7 @@ class GGUFWriter:
         self.offset_tensor += GGUFWriter.ggml_pad(tensor_nbytes, self.data_alignment)
         self.ti_data_count += 1
 
-    def add_tensor(self, name: str, tensor: np.ndarray[Any, Any], raw_shape: Optional[Sequence[int]] = None, raw_dtype: Optional[GGMLQuantizationType] = None):
+    def add_tensor(self, name: str, tensor: np.ndarray[Any, Any], raw_shape: Sequence[int] | None = None, raw_dtype: GGMLQuantizationType | None = None):
         if self.use_temp_file and self.temp_file is None:
             fp = tempfile.SpooledTemporaryFile(mode="w+b", max_size=256*1024*1024)
             fp.seek(0)
@@ -600,7 +640,7 @@ class GGUFWriter:
         if pad != 0:
             self.temp_file.write(bytes([0] * pad))
 
-    def write_padding(self, fp: BinaryIO, n: int, align: Optional[int] = None):
+    def write_padding(self, fp: BinaryIO, n: int, align: int | None = None):
         pad = GGUFWriter.ggml_pad(n, align if align is not None else self.data_alignment) - n
         if pad != 0:
             fp.write(bytes([0] * pad))
@@ -726,13 +766,13 @@ class GGUFWriter:
     def add_tokenizer_model(self, model: str):
         self.add_string(KEY_TOKENIZER_MODEL, model)
 
-    def add_token_list(self, tokens: Union[Sequence[str], Sequence[bytes], Sequence[bytearray]]):
+    def add_token_list(self, tokens: Sequence[str] | Sequence[bytes] | Sequence[bytearray]):
         self.add_array(KEY_TOKENIZER_LIST, tokens)
 
-    def add_token_merges(self, merges: Union[Sequence[str], Sequence[bytes], Sequence[bytearray]]):
+    def add_token_merges(self, merges: Sequence[str] | Sequence[bytes] | Sequence[bytearray]):
         self.add_array(KEY_TOKENIZER_MERGES, merges)
 
-    def add_token_types(self, types: Union[Sequence[TokenType], Sequence[int]]):
+    def add_token_types(self, types: Sequence[TokenType] | Sequence[int]):
         self.add_array(KEY_TOKENIZER_TOKEN_TYPE, types)
 
     def add_token_scores(self, scores: Sequence[float]):
@@ -756,11 +796,11 @@ class GGUFWriter:
 
 class SpecialVocab:
     load_merges: bool = False
-    merges: List[str] = []
-    special_token_types: Tuple[str, ...] = tuple(('bos', 'eos', 'unk', 'sep', 'pad'))
-    special_token_ids: Dict[str, int] = {}
+    merges: list[str] = []
+    special_token_types: tuple[str, ...] = ('bos', 'eos', 'unk', 'sep', 'pad')
+    special_token_ids: dict[str, int] = {}
 
-    def __init__(self, path: Path, load_merges: bool = False, special_token_types: Optional[Tuple[str, ...]] = None):
+    def __init__(self, path: Path, load_merges: bool = False, special_token_types: tuple[str, ...] | None = None):
         self.special_token_ids = {}
         self.load_merges = load_merges
         if special_token_types is not None:
@@ -799,7 +839,7 @@ class SpecialVocab:
             else:
                 continue
             for maybe_token_id in (atok.get('id') for atok in added_tokens if atok.get('content') == tc_content):
-                if isinstance(maybe_token_id, int):
+                if isinstance(maybe_token_id, int) and maybe_token_id >= 0:
                     self.special_token_ids[typ] = maybe_token_id
                 break
         return True
@@ -812,7 +852,7 @@ class SpecialVocab:
             config = json.load(f)
         for typ in self.special_token_types:
             maybe_token_id = config.get(f'{typ}_token_id')
-            if isinstance(maybe_token_id, int):
+            if isinstance(maybe_token_id, int) and maybe_token_id >= 0:
                 self.special_token_ids[typ] = maybe_token_id
         return True
 
@@ -821,7 +861,7 @@ class SpecialVocab:
             print(f'gguf: Adding {len(self.merges)} merge(s).')
             gw.add_token_merges(self.merges)
         for typ, tokid in self.special_token_ids.items():
-            handler: Optional[Callable[[int], None]] = getattr(gw, f'add_{typ}_token_id', None)
+            handler: Callable[[int], None] | None = getattr(gw, f'add_{typ}_token_id', None)
             if handler is None:
                 print(f'gguf: WARNING: No handler for special token type {typ} with id {tokid} - skipping')
                 continue
