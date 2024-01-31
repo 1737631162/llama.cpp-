@@ -1,6 +1,6 @@
 ## 使用llama.cpp量化部署
 
-以[llama.cpp工具](https://github.com/Rayrtfr/llama.cpp)为例，介绍模型量化并在本地部署的详细步骤。Windows则可能需要cmake等编译工具的安装。**本地快速部署体验推荐使用经过指令精调的Atom-7B-Chat模型，有条件的推荐使用6-bit或者8-bit模型，效果更佳。** 运行前请确保：
+以[llama.cpp工具](https://github.com/Rayrtfr/llama.cpp)为例，介绍模型量化并在本地部署的详细步骤。Windows则可能需要cmake等编译工具的安装。**本地快速部署体验推荐使用经过指令精调的[Atom-7B-Chat](https://github.com/LlamaFamily/Llama2-Chinese?tab=readme-ov-file#%E5%9F%BA%E4%BA%8Ellama2%E7%9A%84%E4%B8%AD%E6%96%87%E9%A2%84%E8%AE%AD%E7%BB%83%E6%A8%A1%E5%9E%8Batom)模型，有条件的推荐使用6-bit或者8-bit模型，效果更佳。** 运行前请确保：
 
 1. 系统应有`make`（MacOS/Linux自带）或`cmake`（Windows需自行安装）编译工具
 2. 建议使用Python 3.10以上编译和运行该工具
@@ -40,7 +40,7 @@ $ LLAMA_METAL=1 make
 ```bash
 $ python convert.py --outfile ./atom-7B-cpp.gguf  /path/Atom-7B-Chat
 
-$ ./quantize ./atom-7B-cpp.gguf ../ggml-atom-7B-q4_0.gguf q4_0
+$ ./quantize ./atom-7B-cpp.gguf ./ggml-atom-7B-q4_0.gguf q4_0
 ```
 
 ### Step 3: 加载并启动模型
@@ -53,9 +53,13 @@ $ ./quantize ./atom-7B-cpp.gguf ../ggml-atom-7B-q4_0.gguf q4_0
 ```bash
 text="<s>Human: 介绍一下北京\n</s><s>Assistant:"
 ./main -m \
-../ggml-atom-7B-q4_0.gguf \
+./ggml-atom-7B-q4_0.gguf \
 -p "${text}"  \
 --logdir ./logtxt 
+```
+如果要带聊天的上下文，上面的text需要调整成类似这样：
+```bash
+text="<s>Human: 介绍一下北京\n</s><s>Assistant:北京是一个美丽的城市</s>\n<s>Human: 再介绍一下合肥\n</s><s>Assistant:"
 ```
 
 更详细的官方说明请参考：[https://github.com/Rayrtfr/llama.cpp/tree/master/examples/main](https://github.com/Rayrtfr/llama.cpp/tree/master/examples/main)
