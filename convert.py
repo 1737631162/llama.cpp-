@@ -225,6 +225,10 @@ class Params:
                 rope_scaling_type = gguf.RopeScalingType.YARN
                 n_orig_ctx = rope_scaling['original_max_position_embeddings']
                 rope_finetuned = rope_scaling['finetuned']
+            elif typ == "dynamic": # for support Atom-7B
+                rope_scaling_type = gguf.RopeScalingType.YARN
+                n_orig_ctx = config.get("max_position_embeddings")
+                rope_finetuned = False
             else:
                 raise NotImplementedError(f'Unknown rope scaling type: {typ}')
 
