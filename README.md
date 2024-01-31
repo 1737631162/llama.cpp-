@@ -51,12 +51,6 @@ $ ./quantize ./atom-7B-cpp.gguf ../ggml-atom-7B-q4_0.gguf q4_0
 
 使用以下命令启动聊天。
 ```bash
-./main -m $1 --color --interactive-first \
--c 4096 -t 6 --temp 0.2 --repeat_penalty 1.1 -ngl 999 \
---in-prefix ' [INST] ' --in-suffix ' [/INST]'
-```
-
-```bash
 text="<s>Human: 介绍一下北京\n</s><s>Assistant:"
 ./main -m \
 ../ggml-atom-7B-q4_0.gguf \
